@@ -59,9 +59,9 @@ func WriteJson(w http.ResponseWriter, status int, v map[string]any) error {
 
 func uploadFilesToCdn(file io.Reader, email string, filename string) (string, error) {
 	var (
-		bunnyStorageZone = "sourishbeast7"
-		bunnyStorageKey  = "b3333f3d-cf54-46be-b8187eb7dd44-ddd0-499f"
-		bunnyStorageHost = "sg.storage.bunnycdn.com"
+		bunnyStorageZone = os.Getenv("BUNNYCDNSZONE")
+		bunnyStorageKey  = os.Getenv("BUNNYCDNPASS")
+		bunnyStorageHost = os.Getenv("BUNNYCDNHOST")
 	)
 	uploadURL := fmt.Sprintf("https://%s/%s/profilepictures/%s/%s", bunnyStorageHost, bunnyStorageZone, email, filename)
 
@@ -160,21 +160,9 @@ func (s *Server) handleChatRoutes(router *mux.Router) {
 			"message": "Chatroom",
 		})
 	})).Methods("GET")
-	// router.HandleFunc("/{id}", makeHttpHandler(s.openChat)).Methods("GET")
 	router.HandleFunc("/room", makeHttpHandler(s.wsConnHandler))
 }
 
-//Testing Routes Start
-
-func (s *Server) handleTestingRoutes(router *mux.Router) {
-	router.HandleFunc("/upload", makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
-		return WriteJson(w, http.StatusOK, Response{
-			"info": "test route",
-		})
-	})).Methods(http.MethodGet)
-}
-
-// Testing routes End
 func (s *Server) wsConnHandler(w http.ResponseWriter, r *http.Request) error {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -219,3 +207,15 @@ func (s *Server) broadcast(sender *websocket.Conn, messageType int, data []byte)
 	}
 	return nil
 }
+
+//Testing Routes Start
+
+func (s *Server) handleTestingRoutes(router *mux.Router) {
+	router.HandleFunc("/upload", makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
+		return WriteJson(w, http.StatusOK, Response{
+			"info": "test route",
+		})
+	})).Methods(http.MethodGet)
+}
+
+// Testing routes End
