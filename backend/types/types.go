@@ -21,3 +21,8 @@ type Messages struct {
 	ArrivalTime time.Time `json:"arrivalTime"`
 	Owner       string    `json:"owner"`
 }
+
+type TempUser struct {
+	Email    string
+	Password string
+}

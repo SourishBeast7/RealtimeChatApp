@@ -11,6 +11,7 @@ import (
 
 	"github.com/SourishBeast7/Glooo/db"
 	"github.com/SourishBeast7/Glooo/types"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/rs/cors"
@@ -86,6 +87,23 @@ func uploadFilesToCdn(file io.Reader, email string, filename string) (string, er
 	return uploadURL, nil
 }
 
+func GenerateJWT(user *types.User) (string, error) {
+	claims := jwt.MapClaims{
+		"email":     user.Email,
+		"name":      user.Name,
+		"pfp":       user.Pfp,
+		"createdAt": user.CreatedAt,
+	}
+	jwtSecret := os.Getenv("JWT_SECRET")
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signedToken, err := token.SignedString(jwtSecret)
+	if err != nil {
+		return "", err
+	}
+
+	return signedToken, nil
+}
+
 func (s *Server) HandleRoutes() {
 	router := mux.NewRouter()
 	c := cors.New(cors.Options{
@@ -122,6 +140,11 @@ func (s *Server) handleAuthRoutes(router *mux.Router) {
 		if err != nil {
 			return err
 		}
+		if s.store.UserAlreadyExists(user.Email) {
+			return WriteJson(w, http.StatusNotAcceptable, Response{
+				"message": "User Already Exists",
+			})
+		}
 		defer file.Close()
 		os.MkdirAll("uploads/"+user.Email, os.ModePerm)
 		out, err := os.Create("uploads/" + user.Email + "/" + header.Filename)
@@ -140,14 +163,30 @@ func (s *Server) handleAuthRoutes(router *mux.Router) {
 		user.Pfp = pfp
 		res, err := s.store.AddUser(user)
 		if err != nil {
+			WriteJson(w, http.StatusNotAcceptable, res)
 			return err
 		}
 		return WriteJson(w, http.StatusOK, res)
 	})).Methods(http.MethodPost)
 
 	router.HandleFunc("/login", makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
+		u := new(types.TempUser)
+		if err := json.NewDecoder(r.Body).Decode(u); err != nil {
+			return WriteJson(w, http.StatusNotAcceptable, Response{
+				"message": u,
+			})
+		}
+		res, err := s.store.FindUser(u.Email, u.Password)
+		// token, err := GenerateJWT(user)
+		if err != nil {
+			WriteJson(w, http.StatusNotAcceptable, Response{
+				"res": res,
+			})
+			return err
+		}
+		// r.Header.Set("Authorization", token)
 		return WriteJson(w, http.StatusOK, Response{
-			"message": "Auth Router",
+			"res": res,
 		})
 	})).Methods(http.MethodPost)
 }

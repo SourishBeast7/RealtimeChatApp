@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/SourishBeast7/Glooo/types"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/bcrypt"
@@ -73,14 +74,6 @@ func (s *Store) AddUser(user *types.User) (map[string]any, error) {
 		"message": "An Error Occured",
 	}
 	defer cancel()
-	// if err := s.UserAlreadyExists(user.Email); err != nil {
-	// 	return map[string]any{
-	// 			"message": "User already exists",
-	// 		}, &MyError{
-	// 			Code:    402,
-	// 			Message: "User Already Exists",
-	// 		}
-	// }
 	hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return errmap, err
@@ -99,11 +92,31 @@ func (s *Store) AddUser(user *types.User) (map[string]any, error) {
 	}, nil
 }
 
-func (s *Store) UserAlreadyExists(email string) *mongo.SingleResult {
+func (s *Store) UserAlreadyExists(email string) bool {
 	ctx, cancel := genContext()
 	defer cancel()
-	res := s.userColl.FindOne(ctx, email)
-	return res
+	filter := bson.M(map[string]any{"email": email})
+	res := s.userColl.FindOne(ctx, filter)
+	var user any
+	res.Decode(&user)
+	return (user != nil)
+}
+
+func (s *Store) FindUser(email string, password string) (*types.User, error) {
+	ctx, cancel := genContext()
+	log.Println(email, password)
+	defer cancel()
+	filter := bson.M(map[string]any{"email": email})
+	res := s.userColl.FindOne(ctx, filter)
+	user := new(types.User)
+	if err := res.Decode(user); err != nil {
+		return nil, err
+	}
+	err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
 func (s *Store) CreateChat(userIds ...string) bool {
