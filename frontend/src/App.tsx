@@ -11,6 +11,7 @@ import myImage from '/logo.png?url'
 //CSS imported Here
 
 import "./App.css";
+import Feed from "./pages/Feed";
 
 const App = () => {
   return (
@@ -30,6 +31,7 @@ const App = () => {
         <Route path="/" element={<Home />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/app/feed" element={<Feed/>}/>
       </Routes>
     </Router>
   );

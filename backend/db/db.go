@@ -105,7 +105,7 @@ func (s *Store) UserAlreadyExists(email string) bool {
 func (s *Store) FindUser(email string, password string) (*t.User, error) {
 	ctx, cancel := genContext()
 	defer cancel()
-	filter := bson.M(map[string]any{"email": email})
+	filter := bson.M{"email": email}
 	res := s.userColl.FindOne(ctx, filter)
 	user := new(t.User)
 	if err := res.Decode(user); err != nil {
