@@ -147,16 +147,6 @@ func (s *Server) handleAuthRoutes(router *mux.Router) {
 			})
 		}
 		defer file.Close()
-		os.MkdirAll("uploads/"+user.Email, os.ModePerm)
-		out, err := os.Create("uploads/" + user.Email + "/" + header.Filename)
-		if err != nil {
-			return err
-		}
-		defer out.Close()
-		_, err = io.Copy(out, file)
-		if err != nil {
-			return err
-		}
 		pfp, err := uploadFilesToCdn(file, user.Email, header.Filename)
 		if err != nil {
 			return err

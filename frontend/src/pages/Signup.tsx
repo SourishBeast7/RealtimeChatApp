@@ -24,7 +24,7 @@ function Signup() {
     formData.append("password", password)
 
     try {
-      const response = await axios.post("http://localhost:3000/test/file", formData, {
+      const response = await axios.post("http://localhost:3000/auth/signup", formData, {
         headers: {
           "Content-Type": "multipart/form-data",
         }
