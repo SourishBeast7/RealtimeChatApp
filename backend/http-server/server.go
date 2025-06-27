@@ -206,12 +206,12 @@ func (s *Server) handleAuthRoutes(router *mux.Router) {
 //WebSocket - Websocket routes
 
 func (s *Server) handleChatRoutes(router *mux.Router) {
-	router.HandleFunc("/", makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
+	router.HandleFunc("/", m.AuthMiddleWare(makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
 		return WriteJson(w, http.StatusOK, Response{
 			"message": "Chatroom",
 		})
-	})).Methods("GET")
-	router.HandleFunc("/room", makeHttpHandler(s.wsConnHandler))
+	}))).Methods("GET")
+	router.HandleFunc("/room", m.AuthMiddleWare(makeHttpHandler(s.wsConnHandler)))
 }
 
 func (s *Server) wsConnHandler(w http.ResponseWriter, r *http.Request) error {
@@ -262,14 +262,12 @@ func (s *Server) broadcast(sender *websocket.Conn, messageType int, data []byte)
 //Testing Routes Start
 
 func (s *Server) handleTestingRoutes(router *mux.Router) {
-	// router.Use(middleware.AuthMiddleware)
 	router.HandleFunc("/", makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
 		return WriteJson(w, http.StatusOK, Response{
 			"info": "test route",
 		})
 	})).Methods(http.MethodGet)
-	router.HandleFunc("/t1", m.TestMiddleWare(makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
-
+	router.HandleFunc("/t1", m.AuthMiddleWare(makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
 		return WriteJson(w, http.StatusOK, Response{
 			"message": "Destination Reached",
 		})
