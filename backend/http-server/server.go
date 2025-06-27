@@ -10,7 +10,8 @@ import (
 	"sync"
 
 	"github.com/SourishBeast7/Glooo/db"
-	"github.com/SourishBeast7/Glooo/types"
+	m "github.com/SourishBeast7/Glooo/http-server/middleware"
+	t "github.com/SourishBeast7/Glooo/types"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
@@ -87,14 +88,14 @@ func uploadFilesToCdn(file io.Reader, email string, filename string) (string, er
 	return uploadURL, nil
 }
 
-func GenerateJWT(user *types.User) (string, error) {
+func GenerateJWT(user *t.User) (string, error) {
 	claims := jwt.MapClaims{
 		"email":     user.Email,
 		"name":      user.Name,
 		"pfp":       user.Pfp,
 		"createdAt": user.CreatedAt,
 	}
-	jwtSecret := os.Getenv("JWT_SECRET")
+	jwtSecret := []byte(os.Getenv("JWT_SECRET"))
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signedToken, err := token.SignedString(jwtSecret)
 	if err != nil {
@@ -128,7 +129,7 @@ func (s *Server) HandleRoutes() {
 func (s *Server) handleAuthRoutes(router *mux.Router) {
 
 	router.HandleFunc("/signup", makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
-		user := new(types.User)
+		user := new(t.User)
 		err := r.ParseMultipartForm(10 << 20)
 		if err != nil {
 			return err
@@ -170,23 +171,34 @@ func (s *Server) handleAuthRoutes(router *mux.Router) {
 	})).Methods(http.MethodPost)
 
 	router.HandleFunc("/login", makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
-		u := new(types.TempUser)
+		u := new(t.TempUser)
 		if err := json.NewDecoder(r.Body).Decode(u); err != nil {
 			return WriteJson(w, http.StatusNotAcceptable, Response{
 				"message": u,
 			})
 		}
-		res, err := s.store.FindUser(u.Email, u.Password)
-		// token, err := GenerateJWT(user)
+		user, err := s.store.FindUser(u.Email, u.Password)
+		if err != nil {
+			return err
+		}
+		token, err := GenerateJWT(user)
 		if err != nil {
 			WriteJson(w, http.StatusNotAcceptable, Response{
-				"res": res,
+				"success": false,
 			})
 			return err
 		}
-		// r.Header.Set("Authorization", token)
+		finalToken := fmt.Sprintf("Bearer %s", token)
+		http.SetCookie(w, &http.Cookie{
+			Name:     "token",
+			Value:    finalToken,
+			HttpOnly: true,
+			Path:     "/",
+			SameSite: http.SameSiteLaxMode,
+			Secure:   false, // Set to true in production with HTTPS
+		})
 		return WriteJson(w, http.StatusOK, Response{
-			"res": res,
+			"success": true,
 		})
 	})).Methods(http.MethodPost)
 }
@@ -250,11 +262,18 @@ func (s *Server) broadcast(sender *websocket.Conn, messageType int, data []byte)
 //Testing Routes Start
 
 func (s *Server) handleTestingRoutes(router *mux.Router) {
-	router.HandleFunc("/upload", makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
+	// router.Use(middleware.AuthMiddleware)
+	router.HandleFunc("/", makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
 		return WriteJson(w, http.StatusOK, Response{
 			"info": "test route",
 		})
 	})).Methods(http.MethodGet)
+	router.HandleFunc("/t1", m.TestMiddleWare(makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
+
+		return WriteJson(w, http.StatusOK, Response{
+			"message": "Destination Reached",
+		})
+	})))
 }
 
 // Testing routes End

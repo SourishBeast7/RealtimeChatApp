@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/SourishBeast7/Glooo/types"
+	t "github.com/SourishBeast7/Glooo/types"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -68,7 +68,7 @@ func ConnectMongo() *Store {
 	}
 }
 
-func (s *Store) AddUser(user *types.User) (map[string]any, error) {
+func (s *Store) AddUser(user *t.User) (map[string]any, error) {
 	ctx, cancel := genContext()
 	errmap := map[string]any{
 		"message": "An Error Occured",
@@ -79,7 +79,7 @@ func (s *Store) AddUser(user *types.User) (map[string]any, error) {
 		return errmap, err
 	}
 	user.Password = string(hash)
-	user.Chats = []types.Chats{}
+	user.Chats = []t.Chats{}
 	now := time.Now()
 	user.CreatedAt = now.Format("2006-01-02 15:04:05")
 	_, e := s.userColl.InsertOne(ctx, user)
@@ -102,13 +102,12 @@ func (s *Store) UserAlreadyExists(email string) bool {
 	return (user != nil)
 }
 
-func (s *Store) FindUser(email string, password string) (*types.User, error) {
+func (s *Store) FindUser(email string, password string) (*t.User, error) {
 	ctx, cancel := genContext()
-	log.Println(email, password)
 	defer cancel()
 	filter := bson.M(map[string]any{"email": email})
 	res := s.userColl.FindOne(ctx, filter)
-	user := new(types.User)
+	user := new(t.User)
 	if err := res.Decode(user); err != nil {
 		return nil, err
 	}
@@ -122,9 +121,9 @@ func (s *Store) FindUser(email string, password string) (*types.User, error) {
 func (s *Store) CreateChat(userIds ...string) bool {
 	ctx, cancel := genContext()
 	defer cancel()
-	chat := new(types.Chats)
+	chat := new(t.Chats)
 	chat.Participants = userIds
-	chat.Messages = make([]types.Messages, 0)
+	chat.Messages = make([]t.Messages, 0)
 	_, err := s.chatsColl.InsertOne(ctx, chat)
 	if err != nil {
 		log.Println(err.Error())
@@ -132,7 +131,7 @@ func (s *Store) CreateChat(userIds ...string) bool {
 	}
 	return true
 }
-func (s *Store) AddMessages(message types.Messages) bool {
+func (s *Store) AddMessages(message t.Messages) bool {
 	ctx, cancel := genContext()
 	defer cancel()
 	_, err := s.chatsColl.InsertOne(ctx, message)
