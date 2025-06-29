@@ -1,28 +1,32 @@
 package types
 
-import "time"
-
-type User struct {
-	Email     string  `json:"email"`
-	Name      string  `json:"name"`
-	Password  string  `json:"password"`
-	Pfp       string  `json:"pfp"`
-	CreatedAt string  `json:"createdAt"`
-	Chats     []Chats `json:"chats"`
-}
+import (
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
 
 type Chats struct {
-	Participants []string   `json:"participants"`
-	Messages     []Messages `json:"messages"`
+	Group        bool
+	Participants []primitive.ObjectID `json:"participants"`
+	Messages     []primitive.ObjectID `json:"messages"`
 }
 
-type Messages struct {
-	Data        string    `json:"data"`
-	ArrivalTime time.Time `json:"arrivalTime"`
-	Owner       string    `json:"owner"`
+type Message struct {
+	Data        string             `json:"data"`
+	ArrivalTime string             `json:"arrivalTime"`
+	Owner       primitive.ObjectID `json:"owner"`
 }
 
 type TempUser struct {
 	Email    string
 	Password string
+}
+
+type MongoUser struct {
+	ID        primitive.ObjectID   `bson:"_id,omitempty" json:"id,omitempty"`
+	Email     string               `json:"email"`
+	Name      string               `json:"name"`
+	Password  string               `json:"-"`
+	Pfp       string               `json:"pfp"`
+	CreatedAt string               `json:"createdAt"`
+	Chats     []primitive.ObjectID `json:"chats"`
 }

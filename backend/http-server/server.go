@@ -16,6 +16,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/rs/cors"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type Server struct {
@@ -32,17 +33,17 @@ type Response map[string]any
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		return true // ✅ Allow all origins temporarily
+	},
 }
 
 func NewServer(addr string) *Server {
 	return &Server{
 		listenAddr: addr,
 		conn:       make(map[*websocket.Conn]bool),
+		store:      db.ConnectMongo(),
 	}
-}
-
-func (s *Server) NewStore() {
-	s.store = db.ConnectMongo()
 }
 
 func makeHttpHandler(f handlerFunc) http.HandlerFunc {
@@ -88,7 +89,7 @@ func uploadFilesToCdn(file io.Reader, email string, filename string) (string, er
 	return uploadURL, nil
 }
 
-func GenerateJWT(user *t.User) (string, error) {
+func GenerateJWT(user *t.MongoUser) (string, error) {
 	claims := jwt.MapClaims{
 		"email":     user.Email,
 		"name":      user.Name,
@@ -114,22 +115,24 @@ func (s *Server) HandleRoutes() {
 	})
 
 	handler := c.Handler(router)
-	s.NewStore()
 	s.handleAuthRoutes(router.PathPrefix("/auth").Subrouter())
 	s.handleChatRoutes(router.PathPrefix("/chat").Subrouter())
+	s.handleApiRoutes(router.PathPrefix("/api").Subrouter())
 	s.handleTestingRoutes(router.PathPrefix("/test").Subrouter())
+
 	router.HandleFunc("/", makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
 		return WriteJson(w, http.StatusOK, Response{
 			"message": "Welcome",
 		})
 	}))
+	log.Printf("🚀 Server started on http://localhost%s", s.listenAddr)
 	http.ListenAndServe(s.listenAddr, handler)
 }
 
 func (s *Server) handleAuthRoutes(router *mux.Router) {
 
 	router.HandleFunc("/signup", makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
-		user := new(t.User)
+		user := new(t.MongoUser)
 		err := r.ParseMultipartForm(10 << 20)
 		if err != nil {
 			return err
@@ -167,7 +170,7 @@ func (s *Server) handleAuthRoutes(router *mux.Router) {
 				"message": u,
 			})
 		}
-		user, err := s.store.FindUser(u.Email, u.Password)
+		user, err := s.store.AuthenticateUser(u.Email, u.Password)
 		if err != nil {
 			return err
 		}
@@ -178,10 +181,19 @@ func (s *Server) handleAuthRoutes(router *mux.Router) {
 			})
 			return err
 		}
+		id := user.ID.Hex()
 		finalToken := fmt.Sprintf("Bearer %s", token)
 		http.SetCookie(w, &http.Cookie{
 			Name:     "token",
 			Value:    finalToken,
+			HttpOnly: true,
+			Path:     "/",
+			SameSite: http.SameSiteLaxMode,
+			Secure:   false, // Set to true in production with HTTPS
+		})
+		http.SetCookie(w, &http.Cookie{
+			Name:     "UID",
+			Value:    string(id),
 			HttpOnly: true,
 			Path:     "/",
 			SameSite: http.SameSiteLaxMode,
@@ -193,32 +205,100 @@ func (s *Server) handleAuthRoutes(router *mux.Router) {
 	})).Methods(http.MethodPost)
 }
 
+func (s *Server) handleApiRoutes(router *mux.Router) {
+	router.HandleFunc("/getchats", m.AuthMiddleWare(makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
+		userId, err := r.Cookie("UID")
+		if err != nil {
+			WriteJson(w, http.StatusNotAcceptable, Response{
+				"err": err,
+			})
+			return err
+		}
+
+		res, err := s.store.GetChats(userId.Value)
+		if err != nil {
+			return err
+		}
+		return WriteJson(w, http.StatusOK, Response{
+			"data": res,
+		})
+	}))).Methods(http.MethodGet)
+	router.HandleFunc("/chat/create", m.AuthMiddleWare(makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
+		userId, err := r.Cookie("UID")
+		if err != nil {
+			WriteJson(w, http.StatusNotAcceptable, Response{
+				"err": err.Error(),
+			})
+			return err
+		}
+		id, err := primitive.ObjectIDFromHex(userId.Value)
+		if err != nil {
+			return err
+		}
+		user1, e := s.store.FindUserById(id)
+		if e != nil {
+			WriteJson(w, http.StatusNotAcceptable, Response{
+				"err": e.Error(),
+			})
+			return e
+		}
+		data := make(map[string]string, 0)
+		if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+			WriteJson(w, http.StatusNotAcceptable, Response{
+				"err": err.Error(),
+			})
+			return err
+		}
+		user2, err := s.store.FindUserByEmail(data["email"])
+		if err != nil {
+			WriteJson(w, http.StatusNotAcceptable, Response{
+				"err": err.Error(),
+			})
+			return err
+		}
+		res := s.store.CreateChat(user1.ID, user2.ID)
+		return WriteJson(w, http.StatusOK, Response{
+			"success": res,
+		})
+
+	}))).Methods(http.MethodPost)
+}
+
 //WebSocket - Websocket routes
 
 func (s *Server) handleChatRoutes(router *mux.Router) {
-	router.HandleFunc("/", m.AuthMiddleWare(makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
-		return WriteJson(w, http.StatusOK, Response{
-			"message": "Chatroom",
-		})
-	}))).Methods("GET")
-	router.HandleFunc("/room", m.AuthMiddleWare(makeHttpHandler(s.wsConnHandler)))
+	// router.HandleFunc("/{id}", m.AuthMiddleWare(makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
+	// 	userId := mux.Vars(r)["id"]
+	// 	return WriteJson(w, http.StatusOK, Response{
+	// 		"chat id": userId,
+	// 	})
+	// }))).Methods("GET")
+	router.HandleFunc("/io", m.AuthMiddleWare(makeHttpHandler(s.wsConnHandler))).Methods(http.MethodGet)
 }
 
 func (s *Server) wsConnHandler(w http.ResponseWriter, r *http.Request) error {
+	log.Println("➡️ Incoming WebSocket request...")
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println(err.Error())
+		log.Println("❌ WebSocket upgrade failed:", err)
 		return err
 	}
+
+	log.Println("✅ WebSocket connection upgraded")
+	userId, err := r.Cookie("UID")
+	if err != nil {
+		return err
+	}
+
 	s.mutex.Lock()
 	s.conn[conn] = true
 	s.mutex.Unlock()
 
-	go s.readLoop(conn)
+	go s.readLoop(conn, userId.Value)
 	return nil
 }
 
-func (s *Server) readLoop(con *websocket.Conn) error {
+func (s *Server) readLoop(con *websocket.Conn, userID string) {
 	defer func() {
 		s.mutex.Lock()
 		delete(s.conn, con)
@@ -226,28 +306,28 @@ func (s *Server) readLoop(con *websocket.Conn) error {
 		con.Close()
 	}()
 	for {
-		messageType, msg, err := con.ReadMessage()
-		s.broadcast(con, websocket.TextMessage, []byte(fmt.Sprintf("Hello User and Your Message : %s", string(msg))))
-		if err != nil {
-			return err
+		var v map[string]any
+
+		if err := con.ReadJSON(&v); err != nil {
+			log.Printf("%+v", err)
 		}
-		log.Println(con.RemoteAddr().String(), messageType, string(msg))
+		log.Printf("%v, %s", v, userID)
 	}
 }
 
-func (s *Server) broadcast(sender *websocket.Conn, messageType int, data []byte) error {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-	for con, b := range s.conn {
-		if !b || con == sender {
-			continue
-		}
-		if err := con.WriteMessage(messageType, data); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+// func (s *Server) broadcast(sender *websocket.Conn, messageType int, data []byte) error {
+// 	s.mutex.Lock()
+// 	defer s.mutex.Unlock()
+// 	for con, b := range s.conn {
+// 		if !b || con == sender {
+// 			continue
+// 		}
+// 		if err := con.WriteMessage(messageType, data); err != nil {
+// 			return err
+// 		}
+// 	}
+// 	return nil
+// }
 
 //Testing Routes Start
 

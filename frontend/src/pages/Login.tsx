@@ -19,9 +19,10 @@ function Login() {
         email,
         password,
       });
+      console.log(await document.cookie)
       const data = await res.data;
       if (data.success){
-        navigator("/app/feed")
+        navigator("/app/chat")
       }
     } catch (err) {
       console.error("Login failed:", err);
