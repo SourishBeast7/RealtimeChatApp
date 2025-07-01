@@ -14,7 +14,7 @@ func AuthMiddleWare(f http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("token")
 		if err != nil {
-			log.Println(err.Error(), "HEllo")
+			log.Println(err.Error())
 			http.Error(w, "Invalid Token String", http.StatusUnauthorized)
 			return
 		}

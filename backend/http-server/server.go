@@ -109,9 +109,11 @@ func GenerateJWT(user *t.MongoUser) (string, error) {
 func (s *Server) HandleRoutes() {
 	router := mux.NewRouter()
 	c := cors.New(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:5173", "http:localhost:5173/*", "*"},
+		AllowedOrigins:   []string{"http://localhost:5173", "http:localhost:5173/*"},
 		AllowCredentials: true,
 		Debug:            true,
+		AllowedHeaders:   []string{"*"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 	})
 
 	handler := c.Handler(router)
@@ -215,7 +217,7 @@ func (s *Server) handleApiRoutes(router *mux.Router) {
 			return err
 		}
 
-		res, err := s.store.GetChats(userId.Value)
+		res, err := s.store.GetChatsByUserId(userId.Value)
 		if err != nil {
 			return err
 		}
@@ -223,6 +225,22 @@ func (s *Server) handleApiRoutes(router *mux.Router) {
 			"data": res,
 		})
 	}))).Methods(http.MethodGet)
+
+	router.HandleFunc("/getmessages", m.AuthMiddleWare(makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
+		chatid, err := r.Cookie("UID")
+		if err != nil {
+			WriteJson(w, http.StatusNotAcceptable, Response{
+				"err": err,
+			})
+			return err
+		}
+		messages, ok := s.store.FindMessagesByChatId(chatid.Value)
+		return WriteJson(w, http.StatusOK, Response{
+			"success":  ok,
+			"messages": messages,
+		})
+	})))
+
 	router.HandleFunc("/chat/create", m.AuthMiddleWare(makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
 		userId, err := r.Cookie("UID")
 		if err != nil {
@@ -256,9 +274,14 @@ func (s *Server) handleApiRoutes(router *mux.Router) {
 			})
 			return err
 		}
-		res := s.store.CreateChat(user1.ID, user2.ID)
+		res, success := s.store.CreateChat(user1.ID, user2.ID)
+		if !success {
+			return WriteJson(w, http.StatusNotAcceptable, Response{
+				"success": success,
+			})
+		}
 		return WriteJson(w, http.StatusOK, Response{
-			"success": res,
+			"id": res,
 		})
 
 	}))).Methods(http.MethodPost)
@@ -267,53 +290,81 @@ func (s *Server) handleApiRoutes(router *mux.Router) {
 //WebSocket - Websocket routes
 
 func (s *Server) handleChatRoutes(router *mux.Router) {
-	// router.HandleFunc("/{id}", m.AuthMiddleWare(makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
-	// 	userId := mux.Vars(r)["id"]
-	// 	return WriteJson(w, http.StatusOK, Response{
-	// 		"chat id": userId,
-	// 	})
-	// }))).Methods("GET")
-	router.HandleFunc("/io", m.AuthMiddleWare(makeHttpHandler(s.wsConnHandler))).Methods(http.MethodGet)
+	router.HandleFunc("/{chatid}", m.AuthMiddleWare(makeHttpHandler(func(w http.ResponseWriter, r *http.Request) error {
+		userId := mux.Vars(r)["chatid"]
+		return WriteJson(w, http.StatusOK, Response{
+			"chat id": userId,
+		})
+	}))).Methods("GET")
+	// router.HandleFunc("/", m.AuthMiddleWare(makeHttpHandler(s.wsConnHandler))).Methods(http.MethodGet)
 }
 
-func (s *Server) wsConnHandler(w http.ResponseWriter, r *http.Request) error {
-	log.Println("➡️ Incoming WebSocket request...")
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Println("❌ WebSocket upgrade failed:", err)
-		return err
-	}
+// func (s *Server) wsConnHandler(w http.ResponseWriter, r *http.Request) error {
+// 	log.Println("➡️ Incoming WebSocket request...")
+// 	conn, err := upgrader.Upgrade(w, r, nil)
+// 	if err != nil {
+// 		log.Println("❌ WebSocket upgrade failed:", err)
+// 		return err
+// 	}
 
-	log.Println("✅ WebSocket connection upgraded")
-	userId, err := r.Cookie("UID")
-	if err != nil {
-		return err
-	}
+// 	log.Println("✅ WebSocket connection upgraded")
+// 	userId, err := r.Cookie("UID")
+// 	if err != nil {
+// 		return err
+// 	}
 
-	s.mutex.Lock()
-	s.conn[conn] = true
-	s.mutex.Unlock()
+// 	s.mutex.Lock()
+// 	s.conn[conn] = true
+// 	s.mutex.Unlock()
 
-	go s.readLoop(conn, userId.Value)
-	return nil
-}
+// 	go s.readLoop(conn, userId.Value)
+// 	return nil
+// }
 
-func (s *Server) readLoop(con *websocket.Conn, userID string) {
-	defer func() {
-		s.mutex.Lock()
-		delete(s.conn, con)
-		s.mutex.Unlock()
-		con.Close()
-	}()
-	for {
-		var v map[string]any
+// func (s *Server) readLoop(con *websocket.Conn, userID string) {
+// 	defer func() {
+// 		s.mutex.Lock()
+// 		delete(s.conn, con)
+// 		s.mutex.Unlock()
+// 		con.Close()
+// 	}()
+// 	for {
+// 		var m map[string]string
+// 		err := con.ReadJSON(&m)
+// 		if err != nil {
+// 			log.Printf("%+v", err)
+// 			continue
+// 		}
+// 		from, err := primitive.ObjectIDFromHex(userID)
+// 		if err != nil {
+// 			log.Printf("%+v", err)
+// 			continue
+// 		}
+// 		to, err := s.store.FindUserByEmail(m["to"])
+// 		if err != nil {
+// 			log.Println(err.Error())
+// 			continue
+// 		}
+// 		message := new(t.Message)
+// 		message.Data = m["data"]
+// 		message.To = to.ID
+// 		message.From = from
+// 		id, ok := s.store.CreateChat(from, message.To)
+// 		if !ok {
+// 			log.Println("Chat Creation Failed")
+// 			continue
+// 		}
+// 		message.ChatId = id
+// 		message.ArrivalTime = time.Now().Format("2006-01-02 15:04:05")
 
-		if err := con.ReadJSON(&v); err != nil {
-			log.Printf("%+v", err)
-		}
-		log.Printf("%v, %s", v, userID)
-	}
-}
+// 		res := s.store.AddMessages(message, id)
+// 		if !res {
+// 			log.Println("AddMessages Failed")
+// 			return
+// 		}
+// 		log.Printf("%v", message)
+// 	}
+// }
 
 // func (s *Server) broadcast(sender *websocket.Conn, messageType int, data []byte) error {
 // 	s.mutex.Lock()

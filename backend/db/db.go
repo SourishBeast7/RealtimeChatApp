@@ -170,53 +170,59 @@ func (s *Store) UpdateUserDetails(id primitive.ObjectID, field string, value any
 // Operations on User Collections - end
 // Operations on Chats Collections
 
-func (s *Store) CreateChat(userIds ...primitive.ObjectID) bool {
+func (s *Store) CreateChat(userIds ...primitive.ObjectID) (primitive.ObjectID, bool) {
 	ctx, cancel := genContext()
 	defer cancel()
 	chat := new(t.Chats)
 	chat.Participants = userIds
+	n := primitive.NilObjectID
 	if len(userIds) == 2 {
+		to, err := s.FindUserById(userIds[1])
+		if err != nil {
+			log.Printf("Create Chat Error : %v", err)
+			return n, false
+		}
+		chat.Name = to.Name
 		chat.Group = false
 	}
 	seen := make(map[primitive.ObjectID]bool)
 	for _, us := range chat.Participants {
 		if seen[us] {
-			return false
+			return n, false
 		}
 		seen[us] = true
 	}
-
 	chat.Messages = make([]primitive.ObjectID, 0)
 	res, err := s.chatsColl.InsertOne(ctx, chat)
 	chatId, ok := res.InsertedID.(primitive.ObjectID)
 	if !ok {
-		return false
+		return n, false
 	}
 	if err != nil {
 		log.Println(err.Error())
-		return false
+		return n, false
 	}
 	for _, id := range userIds {
 		user, err := s.FindUserById(id)
 		if err != nil {
 			log.Printf("%s", err.Error())
-			return false
+			return n, false
 		}
 		user.Chats = append(user.Chats, chatId)
 		err = s.UpdateUserDetails(id, "chats", user.Chats)
 		if err != nil {
 			logError(err)
 			log.Println(err.Error())
-			return false
+			return n, false
 		}
 	}
-	return true
+	return chatId, true
 }
 
-func (s *Store) GetChats(id string) ([]primitive.ObjectID, error) {
+func (s *Store) GetChatsByUserId(userid string) ([]t.Chats, error) {
 	ctx, cancel := genContext()
 	defer cancel()
-	objid, err := primitive.ObjectIDFromHex(id)
+	objid, err := primitive.ObjectIDFromHex(userid)
 	if err != nil {
 		return nil, err
 	}
@@ -225,34 +231,126 @@ func (s *Store) GetChats(id string) ([]primitive.ObjectID, error) {
 		return nil, err
 	}
 	filter := bson.M{
-		"$in": bson.M{
-			"_id": user.ID,
-		},
+		"participants": user.ID,
 	}
-	chat, er := s.chatsColl.Find(ctx, filter)
+	c, er := s.chatsColl.Find(ctx, filter)
 	if er != nil {
 		return nil, er
 	}
-	var chats any
-	e := chat.All(ctx, &chats)
+	chats := make([]t.Chats, 0)
+	e := c.All(ctx, &chats)
 	if e != nil {
 		return nil, er
 	}
-	return user.Chats, nil
+	return chats, nil
+}
+
+func (s *Store) FindChatById(id primitive.ObjectID) (*t.Chats, error) {
+	ctx, cancel := genContext()
+	defer cancel()
+
+	filter := bson.M{"_id": id}
+	res := s.chatsColl.FindOne(ctx, filter)
+
+	if err := res.Err(); err != nil {
+		return nil, err
+	}
+
+	chat := new(t.Chats)
+	if err := res.Decode(chat); err != nil {
+		return nil, err
+	}
+
+	return chat, nil
+}
+
+func (s *Store) FindChatByParticipants(ids ...primitive.ObjectID) *t.Chats {
+	ctx, cancel := genContext()
+	defer cancel()
+	filter := bson.M{
+		"$in": bson.M{
+			"participants": ids,
+		},
+	}
+	res := s.chatsColl.FindOne(ctx, filter)
+	if err := res.Err(); err != nil {
+		log.Println(err.Error())
+		return nil
+	}
+	chat := new(t.Chats)
+	if err := res.Decode(chat); err != nil {
+		log.Println(err.Error())
+		return nil
+	}
+	return chat
 }
 
 // Operations on Chats Collections - end
 
 // Operations on Message Collection
 
-func (s *Store) AddMessages(message t.Message) bool {
+// func (s *Store) AddMessages(message *t.Message, chatid primitive.ObjectID) bool {
+// 	ctx, cancel := genContext()
+// 	defer cancel()
+// 	now := time.Now()
+// 	message.ArrivalTime = now.Format("2006-01-02 15:04:05")
+// 	session, err := s.messagesColl.Database().Client().StartSession()
+// 	if err != nil {
+// 		log.Println(err.Error())
+// 		return false
+// 	}
+// }
+
+func (s *Store) FindMessagesById(id primitive.ObjectID) *t.Message {
 	ctx, cancel := genContext()
 	defer cancel()
-	now := time.Now()
-	message.ArrivalTime = now.Format("2006-01-02 15:04:05")
-	_, err := s.messagesColl.InsertOne(ctx, message)
+	filter := bson.M{
+		"_id": id,
+	}
+	res := s.messagesColl.FindOne(ctx, filter)
+	if err := res.Err(); err != nil {
+		return nil
+	}
+	message := new(t.Message)
+	res.Decode(message)
+	return message
+}
+
+func (s *Store) FindMessagesByChatId(chatid string) ([]t.Message, bool) {
+	ctx, cancel := genContext()
+	defer cancel()
+	filter := bson.M{
+		"chatid": chatid,
+	}
+	res, err := s.messagesColl.Find(ctx, filter)
 	if err != nil {
-		log.Println(err.Error())
+		log.Printf("FindMessagesByChatId Error :%v", err)
+		return nil, false
+	}
+	messages := make([]t.Message, 0)
+	err = res.All(ctx, &messages)
+	if err != nil {
+		return nil, false
+	}
+	return messages, true
+}
+
+func (s *Store) InsertMessageInChat(chatId, msgId primitive.ObjectID) bool {
+	ctx, cancel := genContext()
+	defer cancel()
+	chat, err := s.FindChatById(chatId)
+	if err != nil {
+		return false
+	}
+	chat.Messages = append(chat.Messages, msgId)
+	data := bson.M{
+		"$push": bson.M{
+			"messages": msgId,
+		},
+	}
+	_, err = s.chatsColl.UpdateByID(ctx, chatId, data)
+	if err != nil {
+		log.Printf("%v", err)
 		return false
 	}
 	return true

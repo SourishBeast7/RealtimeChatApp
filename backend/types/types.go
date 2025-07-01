@@ -5,15 +5,20 @@ import (
 )
 
 type Chats struct {
-	Group        bool
+	ID           primitive.ObjectID   `bson:"_id,omitempty" json:"id,omitempty"`
+	Name         string               `json:"name"`
+	Group        bool                 `json:"group"`
 	Participants []primitive.ObjectID `json:"participants"`
 	Messages     []primitive.ObjectID `json:"messages"`
 }
 
 type Message struct {
+	ID          primitive.ObjectID `bson:"_id,omitempty" json:"id,omitempty"`
 	Data        string             `json:"data"`
 	ArrivalTime string             `json:"arrivalTime"`
-	Owner       primitive.ObjectID `json:"owner"`
+	From        primitive.ObjectID `json:"from"`
+	ChatId      primitive.ObjectID `json:"chatid"`
+	To          primitive.ObjectID `json:"to"`
 }
 
 type TempUser struct {
